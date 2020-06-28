@@ -147,6 +147,7 @@ main() {
         smartctl -a "${disk}" > ${SMARTCTL_OUTPUT} || true
         if ! grep -q 'SMART support is: Available - device has SMART capability.' "${SMARTCTL_OUTPUT}"; then
             error "${disk} SMART information is not available."
+            echo
             continue
         fi
 
@@ -158,24 +159,62 @@ main() {
         else
             error "Health:\t${HEALTH_VAL}"
         fi
-        #echo "ID# ATTRIBUTE_NAME          FLAG     VALUE WORST THRESH TYPE      UPDATED  WHEN_FAILED RAW_VALUE"
-        for i in "${!ERROR_ATTRIBUTES[@]}"; do
-            local ERROR_ATTR_VAL
-            ERROR_ATTR_VAL=$(grep --color=never -P "^\s*${i}\s+${ERROR_ATTRIBUTES[$i]}" "${SMARTCTL_OUTPUT}" | awk '{ print $10 }' | xargs) || true
-            if [[ -n ${ERROR_ATTR_VAL} ]]; then
-                if [[ ${ERROR_ATTR_VAL} == 0 ]]; then
-                    notice "${ERROR_ATTRIBUTES[$i]}:\t${ERROR_ATTR_VAL}"
+        while IFS= read -r line; do
+            local ID_VAL
+            ID_VAL=$(echo "${line}" | awk '{ print $1 }' | xargs) || true
+            local ATTRIBUTE_NAME_VAL
+            ATTRIBUTE_NAME_VAL=$(echo "${line}" | awk '{ print $2 }' | xargs) || true
+            local FLAG_VAL
+            FLAG_VAL=$(echo "${line}" | awk '{ print $3 }' | xargs) || true
+            local VALUE_VAL
+            VALUE_VAL=$(echo "${line}" | awk '{ print $4 }' | xargs) || true
+            local WORST_VAL
+            WORST_VAL=$(echo "${line}" | awk '{ print $5 }' | xargs) || true
+            local THRESH_VAL
+            THRESH_VAL=$(echo "${line}" | awk '{ print $6 }' | xargs) || true
+            local TYPE_VAL
+            TYPE_VAL=$(echo "${line}" | awk '{ print $7 }' | xargs) || true
+            local UPDATED_VAL
+            UPDATED_VAL=$(echo "${line}" | awk '{ print $8 }' | xargs) || true
+            local WHEN_FAILED_VAL
+            WHEN_FAILED_VAL=$(echo "${line}" | awk '{ print $9 }' | xargs) || true
+            local RAW_VALUE_VAL
+            RAW_VALUE_VAL=$(echo "${line}" | awk '{ print $10 }' | xargs) || true
+
+            if [[ ${TYPE_VAL} == "Pre-fail" ]]; then
+                if [[ ${RAW_VALUE_VAL} > 0 ]] || [[ ${RAW_VALUE_VAL} > ${THRESH_VAL} ]]; then
+                    local error="false"
+                    for i in "${!ERROR_ATTRIBUTES[@]}"; do
+                        if [[ ${i} == "${ID_VAL}" ]] && [[ ${ERROR_ATTRIBUTES[$i]} == "${ATTRIBUTE_NAME_VAL}" ]]; then
+                            error="true"
+                        fi
+                    done
+                    if [[ ${error} == "true" ]]; then
+                        error "${ATTRIBUTE_NAME_VAL}:\t${RAW_VALUE_VAL}"
+                    else
+                        warn "${ATTRIBUTE_NAME_VAL}:\t${RAW_VALUE_VAL}"
+                    fi
                 else
-                    error "${ERROR_ATTRIBUTES[$i]}:\t${ERROR_ATTR_VAL}"
+                    info "${ATTRIBUTE_NAME_VAL}:\t${RAW_VALUE_VAL}"
+                fi
+            elif [[ ${TYPE_VAL} == "Old_age" ]]; then
+                if [[ ${RAW_VALUE_VAL} > ${THRESH_VAL} ]]; then
+                    local notice="false"
+                    for i in "${!WARN_ATTRIBUTES[@]}"; do
+                        if [[ ${i} == "${ID_VAL}" ]] && [[ ${WARN_ATTRIBUTES[$i]} == "${ATTRIBUTE_NAME_VAL}" ]]; then
+                            notice="true"
+                        fi
+                    done
+                    if [[ ${notice} == "true" ]]; then
+                        notice "${ATTRIBUTE_NAME_VAL}:\t${RAW_VALUE_VAL}"
+                    else
+                        info "${ATTRIBUTE_NAME_VAL}:\t${RAW_VALUE_VAL}"
+                    fi
+                else
+                    info "${ATTRIBUTE_NAME_VAL}:\t${RAW_VALUE_VAL}"
                 fi
             fi
-        done
-        for i in "${!WARN_ATTRIBUTES[@]}"; do
-            local WARN_ATTR_VAL
-            WARN_ATTR_VAL=$(grep --color=never -P "^\s*${i}\s+${WARN_ATTRIBUTES[$i]}" "${SMARTCTL_OUTPUT}" | awk '{ print $10 }' | xargs) || true
-            warn "${WARN_ATTRIBUTES[$i]}:\t${WARN_ATTR_VAL}"
-        done
-        echo
+        done < <(grep --color=never -P "(Pre-fail|Old_age)\s+(Always|Offline)" "${SMARTCTL_OUTPUT}")
         echo
     done
 }
